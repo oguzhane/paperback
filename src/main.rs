@@ -185,12 +185,12 @@ fn read_multibase_qr<S: AsRef<str>, T: FromWire>(prompt: S) -> Result<T, Error> 
 // paperback-cli recover --interactive
 fn recover_cli() -> Command {
     Command::new("recover")
-        .about("Recover a paperback backup.")
+        .about(r#"Recover a paperback backup."#)
         // Mode flags
         .arg(
             Arg::new("interactive")
                 .long("interactive")
-                .help("Recover interactively using QR codes.")
+                .help("Ask for data stored in QR codes interactively rather than scanning images.")
                 .action(ArgAction::SetTrue),
         )
         .arg(
@@ -213,7 +213,9 @@ fn recover_cli() -> Command {
         // Output file (always required)
         .arg(
             Arg::new("OUTPUT")
-                .help("Path to write recovered secret data to ('-' for stdout).")
+                .help(r#"Path to write recovered secret data to ("-" to write to stdout)."#)
+                .action(ArgAction::Set)
+                .allow_hyphen_values(true)
                 .required(true)
                 .index(1),
         )
