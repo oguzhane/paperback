@@ -269,7 +269,7 @@ fn scan_key_shard(pdf_file: &String) -> Result<KeyShard, Error> {
         .filter_map(|object| object.as_text_object().map(|object| object.text()))
         .enumerate();
 
-    for (idx, text) in texts_iter {
+    for (_, text) in texts_iter {
         if codewords.len() == 24 {
             break;
         }
@@ -385,7 +385,7 @@ fn scan_main_document(pdf_file: &String) -> Result<MainDocument, Error> {
         .filter_map(|object| object.as_text_object().map(|object| object.text()))
         .enumerate();
 
-    for (idx, text) in texts_iter {
+    for (_, text) in texts_iter {
         let trimmed = text.trim();
 
         if trimmed.is_empty() {
@@ -492,8 +492,6 @@ fn recover_from_pdf(
 }
 
 fn recover_interactive() -> Result<UntrustedQuorum, Error> {
-    let mut quorum = UntrustedQuorum::new();
-
     let main_document: MainDocument = read_multibase_qr("Enter a main document code")?;
     let quorum_size = main_document.quorum_size();
     // TODO: Ask the user to input the checksum...
@@ -546,7 +544,7 @@ fn recover(matches: &ArgMatches) -> Result<(), Error> {
         .get_one::<String>("OUTPUT")
         .context("required OUTPUT argument not provided")?;
 
-    let mut quorum: UntrustedQuorum = if !interactive {
+    let quorum: UntrustedQuorum = if !interactive {
         let main_doc_file = matches
             .get_one::<String>("main-document")
             .context("required --main-document argument not provided")?;
