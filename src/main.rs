@@ -202,8 +202,8 @@ fn recover_cli() -> Command {
         )
         // Key shards, required only if main-document is provided
         .arg(
-            Arg::new("key-shards")
-                .long("key-shards")
+            Arg::new("shards")
+                .long("shards")
                 .help("Comma-separated list of key shard PDF files.")
                 .value_name("SHARDS")
                 .required_unless_present("interactive")
@@ -550,8 +550,8 @@ fn recover(matches: &ArgMatches) -> Result<(), Error> {
             .context("required --main-document argument not provided")?;
 
         let key_shard_files: Vec<&String> = matches
-            .get_many::<String>("key-shards")
-            .context("required --key-shards argument not provided")?
+            .get_many::<String>("shards")
+            .context("required --shards argument not provided")?
             .collect();
 
         recover_from_pdf(main_doc_file, &key_shard_files)?
