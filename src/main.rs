@@ -23,9 +23,11 @@ use std::{
     fs::File,
     io::{self, prelude::*, BufReader, BufWriter},
     path,
+    result::Result::{Ok, Err},
 };
 
-use anyhow::{anyhow, bail, ensure, Context, Error, Ok};
+
+use anyhow::{anyhow, bail, ensure, Context, Error};
 use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command};
 
 extern crate paperback_core;
@@ -138,7 +140,10 @@ fn read_multiline<S: AsRef<str>>(prompt: S) -> Result<String, Error> {
     let buffer_stdin = BufReader::new(io::stdin());
     Ok(buffer_stdin
         .lines()
-        .take_while(|s| !matches!(s.as_deref(), Ok("") | Err(_)))
+        .take_while(|s| match s {
+            Ok(line) => !line.is_empty(),
+            Err(_) => false,
+        })
         .collect::<Result<Vec<_>, _>>()
         .map_err(|err| anyhow!("failed to read data: {}", err))?
         .join("\n"))
@@ -185,9 +190,32 @@ fn recover_cli() -> Command {
             Arg::new("interactive")
                 .long("interactive")
                 .help("Ask for data stored in QR codes interactively rather than scanning images.")
-                .action(ArgAction::SetTrue)
-                // TODO: Make this optional.
-                .required(true),
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("file")
+                .long("file")
+                .help("Recover data by scanning PDF files.")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("main-document")
+                .long("main-document")
+                .help("The main PDF document to recover from.")
+                .value_name("PDF")
+                .requires("file")
+                .required_if_eq("file", "true") // required only if --file
+                .action(ArgAction::Set),
+        )
+        .arg(
+            Arg::new("key-shards")
+                .long("key-shards")
+                .help("Comma-separated list of key shard PDF files.")
+                .value_name("SHARDS")
+                .requires("file")
+                .required_if_eq("file", "true") // required only if --file
+                .use_value_delimiter(true)
+                .action(ArgAction::Append),
         )
         .arg(
             Arg::new("OUTPUT")
@@ -196,6 +224,12 @@ fn recover_cli() -> Command {
                 .allow_hyphen_values(true)
                 .required(true)
                 .index(1),
+        )
+        .group(
+            ArgGroup::new("mode")
+                .args(&["interactive", "file"])
+                .required(true)
+                .multiple(false),
         )
 }
 
@@ -714,12 +748,6 @@ fn reprint_cli() -> Command {
                 .long("shard")
                 .help(r#"Reprint a paperback key shard."#)
                 .action(ArgAction::SetTrue),
-        )
-        .group(
-            ArgGroup::new("type")
-                .arg("main-document")
-                .arg("shard")
-                .required(true),
         )
 }
 
