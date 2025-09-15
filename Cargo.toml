@@ -45,6 +45,9 @@ members = [
 clap = { version = "^4", features = ["wrap_help"] }
 anyhow = "^1"
 multibase = "^0.9"
+bardecoder = "=0.5.0"
+image = "=0.24"
+pdfium-render = "=0.8.35"
 
 [patch.crates-io]
 # See <https://github.com/paritytech/unsigned-varint/pull/54>.

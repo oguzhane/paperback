@@ -21,20 +21,23 @@ mod raw;
 use std::{
     error::Error as StdError,
     fs::File,
-    io,
-    io::{prelude::*, BufReader, BufWriter},
+    io::{self, prelude::*, BufReader, BufWriter},
+    ops::Index,
+    path,
 };
 
-use anyhow::{anyhow, bail, ensure, Context, Error};
+use anyhow::{anyhow, bail, ensure, Context, Error, Ok};
 use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command};
 
 extern crate paperback_core;
-use paperback_core::latest as paperback;
+use paperback_core::{latest as paperback, v0::pdf};
 
 use paperback::{
     pdf::qr, wire, Backup, EncryptedKeyShard, FromWire, KeyShard, KeyShardCodewords, MainDocument,
     NewShardKind, ToPdf, UntrustedQuorum,
 };
+
+use pdfium_render::prelude::*;
 
 // paperback-cli backup [--sealed] -n <QUORUM SIZE> -k <SHARDS> INPUT
 fn backup_cli() -> Command {
@@ -197,53 +200,319 @@ fn recover_cli() -> Command {
         )
 }
 
+fn scan_key_shard(pdf_file: &String) -> Result<KeyShard, Error> {
+    let path = path::Path::new(pdf_file);
+    let mut jpg_path = path.to_path_buf();
+    jpg_path.set_extension("jpg");
+
+    ensure!(
+        path.exists(),
+        "key shard document '{}' does not exist",
+        path.display()
+    );
+
+    ensure!(
+        path.extension().and_then(|s| s.to_str()) == Some("pdf"),
+        "key shard document '{}' is not a PDF file",
+        path.display()
+    );
+
+    println!("Scanning key shard document from '{}'...", path.display());
+
+    // Initialize Pdfium
+    let pdfium = Pdfium::new(
+        Pdfium::bind_to_system_library().or_else(|_| Pdfium::bind_to_system_library())?,
+    );
+
+    // Load the PDF document
+    let document = pdfium.load_pdf_from_file(&path, None)?;
+
+    let page = document.pages().first()?;
+
+    let mut codewords: Vec<String> = Vec::new();
+    // Keep track of whether we've seen the 'Codewords' word
+    let mut codewords_seen: bool = false;
+    let mut should_skip = false;
+
+    let texts_iter = page
+        .objects()
+        .iter()
+        .filter_map(|object| object.as_text_object().map(|object| object.text()))
+        .enumerate();
+
+    for (idx, text) in texts_iter {
+        if codewords.len() == 24 {
+            break;
+        }
+
+        let trimmed = text.trim();
+
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if codewords_seen {
+            if should_skip {
+                should_skip = false;
+                continue;
+            }
+            if text.contains("Shard") || text.contains("Document") {
+                should_skip = true;
+                continue;
+            }
+            codewords.push(trimmed.to_string());
+            continue;
+        }
+
+        if trimmed.eq("Codewords") {
+            codewords_seen = true;
+            should_skip = true;
+            continue;
+        }
+    }
+
+    ensure!(
+        !codewords.is_empty(),
+        "failed to find codewords in key shard document"
+    );
+
+    println!("Converting key shard document to image...");
+    let render_config = PdfRenderConfig::new()
+        .set_target_width(2048)
+        .rotate_if_landscape(PdfPageRenderRotation::Degrees90, true);
+    let image = page.render_with_config(&render_config)?.as_image();
+
+    image.save(&jpg_path)?;
+    println!("Saved {}", jpg_path.to_string_lossy());
+
+    println!("Decoding encrypted key shard document QR code...");
+
+    let img = image::open(jpg_path)?;
+
+    let decoder = bardecoder::default_decoder();
+    let barcodes = decoder.decode(&img);
+
+    for barcode in barcodes.iter().filter(|b| b.is_ok()) {
+        let bc = barcode.as_ref().unwrap();
+
+        let encrypted_shard: EncryptedKeyShard = wire::FromWire::from_wire_multibase(
+            wire::multibase_strip(bc)
+                .map_err(|err| anyhow!("failed to strip out non-multibase characters: {}", err))?,
+        )
+        .map_err(|err| anyhow!("failed to parse data: {}", err))?;
+
+        println!(
+            "Key shard {} checksum: {}",
+            pdf_file,
+            encrypted_shard.checksum_string()
+        );
+
+        let shard = encrypted_shard
+            .decrypt(&codewords)
+            .map_err(|err| anyhow!(err))
+            .with_context(|| format!("decrypting key shard {}", pdf_file))?;
+        return Ok(shard);
+    }
+
+    bail!("failed to decode any QR codes from key shard document");
+}
+
+fn scan_main_document(pdf_file: &String) -> Result<MainDocument, Error> {
+    let path = path::Path::new(pdf_file);
+    let mut jpg_path = path.to_path_buf();
+    jpg_path.set_extension("jpg");
+
+    ensure!(
+        path.exists(),
+        "main document '{}' does not exist",
+        path.display()
+    );
+
+    ensure!(
+        path.extension().and_then(|s| s.to_str()) == Some("pdf"),
+        "main document '{}' is not a PDF file",
+        path.display()
+    );
+
+    println!("Scanning main document from '{}'...", path.display());
+
+    // Initialize Pdfium
+    let pdfium = Pdfium::new(
+        Pdfium::bind_to_system_library().or_else(|_| Pdfium::bind_to_system_library())?,
+    );
+
+    // Load the PDF document
+    let document = pdfium.load_pdf_from_file(&path, None)?;
+
+    let page = document.pages().first()?;
+
+    let mut document_code = String::new();
+    // Keep track of whether we've seen the 'Document' word
+    let mut document_seen = false;
+
+    let texts_iter = page
+        .objects()
+        .iter()
+        .filter_map(|object| object.as_text_object().map(|object| object.text()))
+        .enumerate();
+
+    for (idx, text) in texts_iter {
+        let trimmed = text.trim();
+
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if document_seen && document_code.is_empty() {
+            document_code = trimmed.to_string();
+            println!("Document code: {}", document_code);
+            break;
+        }
+
+        if trimmed == "Document" && document_code.is_empty() {
+            document_seen = true;
+            continue;
+        }
+    }
+
+    ensure!(
+        !document_code.is_empty(),
+        "failed to find document code in main document"
+    );
+
+    println!("Converting main document to image...");
+    let render_config = PdfRenderConfig::new()
+        .set_target_width(2048)
+        .rotate_if_landscape(PdfPageRenderRotation::Degrees90, true);
+    let image = page.render_with_config(&render_config)?.as_image();
+
+    image.save(&jpg_path)?;
+    println!("Saved {}", jpg_path.to_string_lossy());
+
+    println!("Decoding main document QR codes...");
+
+    let img = image::open(jpg_path)?;
+
+    let decoder = bardecoder::default_decoder();
+    let barcodes = decoder.decode(&img);
+    let mut joiner = qr::Joiner::new();
+
+    let document_code_part: qr::Part = wire::FromWire::from_wire_multibase(
+        wire::multibase_strip(document_code)
+            .map_err(|err| anyhow!("failed to strip out non-multibase characters: {}", err))?,
+    )
+    .map_err(|err| anyhow!("failed to parse data: {}", err))?;
+
+    joiner.add_part(document_code_part)?;
+
+    for barcode in barcodes.iter().filter(|b| b.is_ok()) {
+        if joiner.complete() {
+            break;
+        }
+
+        let bc = barcode.as_ref().unwrap();
+
+        let bc_code_part: qr::Part = wire::FromWire::from_wire_multibase(
+            wire::multibase_strip(bc)
+                .map_err(|err| anyhow!("failed to strip out non-multibase characters: {}", err))?,
+        )
+        .map_err(|err| anyhow!("failed to parse data: {}", err))?;
+
+        joiner.add_part(bc_code_part)?;
+    }
+
+    ensure!(joiner.complete(), "not all QR code parts were found");
+
+    FromWire::from_wire(joiner.combine_parts()?)
+        .map_err(|err| anyhow!("failed to parse main document data: {}", err))
+}
+
 fn recover(matches: &ArgMatches) -> Result<(), Error> {
     let interactive = matches.get_flag("interactive");
-    ensure!(interactive, "PDF scanning not yet implemented");
+
     let output_path = matches
         .get_one::<String>("OUTPUT")
         .context("required OUTPUT argument not provided")?;
 
-    let main_document: MainDocument = read_multibase_qr("Enter a main document code")?;
-    let quorum_size = main_document.quorum_size();
-    // TODO: Ask the user to input the checksum...
-    println!(
-        "Main document checksum: {}",
-        main_document.checksum_string()
-    );
-
-    println!("Document ID: {}", main_document.id());
-    println!("{} key shards required.", quorum_size);
-
     let mut quorum = UntrustedQuorum::new();
-    quorum.main_document(main_document);
-    while quorum.num_untrusted_shards() < quorum_size as usize {
-        let idx = quorum.num_untrusted_shards() as u32;
-        let encrypted_shard: EncryptedKeyShard = read_multibase(format!(
-            "Quorum contains [{}] key shards.\nEnter key shard {} of {}",
-            quorum
-                .untrusted_shards()
-                .map(KeyShard::id)
-                .collect::<Vec<_>>()
-                .join(" "),
-            idx + 1,
-            quorum_size
-        ))?;
+
+    if !interactive {
+        let main_doc_file = matches
+            .get_one::<String>("main-document")
+            .context("required --main-document argument not provided")?;
+
+        let key_shard_files: Vec<&String> = matches
+            .get_many::<String>("key-shards")
+            .context("required --key-shards argument not provided")?
+            .collect();
+
+        let main_document: MainDocument = scan_main_document(&main_doc_file)?;
+        let quorum_size = main_document.quorum_size();
         // TODO: Ask the user to input the checksum...
         println!(
-            "Key shard {} checksum: {}",
-            idx + 1,
-            encrypted_shard.checksum_string()
+            "Main document checksum: {}",
+            main_document.checksum_string()
         );
 
-        let codewords = read_codewords(format!("Enter key shard {} codewords", idx + 1))?;
-        let shard = encrypted_shard
-            .decrypt(&codewords)
-            .map_err(|err| anyhow!(err)) // TODO: Fix this once FromWire supports non-String errors.
-            .with_context(|| format!("decrypting key shard {}", idx + 1))?;
+        println!("Document ID: {}", main_document.id());
+        println!("{} key shards required.", quorum_size);
+        ensure!(
+            key_shard_files.len() >= quorum_size as usize,
+            "not enough key shard files provided (have {}, need {})",
+            key_shard_files.len(),
+            quorum_size
+        );
 
-        println!("Loaded key shard {}.", shard.id());
-        quorum.push_shard(shard);
+        quorum.main_document(main_document);
+
+        while quorum.num_untrusted_shards() < quorum_size as usize {
+            let idx = quorum.num_untrusted_shards() as usize;
+            let shard = scan_key_shard(key_shard_files[idx])?;
+            println!("Loaded key shard {}.", shard.id());
+            quorum.push_shard(shard);
+        }
+    } else {
+        let main_document: MainDocument = read_multibase_qr("Enter a main document code")?;
+        let quorum_size = main_document.quorum_size();
+        // TODO: Ask the user to input the checksum...
+        println!(
+            "Main document checksum: {}",
+            main_document.checksum_string()
+        );
+
+        println!("Document ID: {}", main_document.id());
+        println!("{} key shards required.", quorum_size);
+
+        let mut quorum = UntrustedQuorum::new();
+        quorum.main_document(main_document);
+        while quorum.num_untrusted_shards() < quorum_size as usize {
+            let idx = quorum.num_untrusted_shards() as u32;
+            let encrypted_shard: EncryptedKeyShard = read_multibase(format!(
+                "Quorum contains [{}] key shards.\nEnter key shard {} of {}",
+                quorum
+                    .untrusted_shards()
+                    .map(KeyShard::id)
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                idx + 1,
+                quorum_size
+            ))?;
+            // TODO: Ask the user to input the checksum...
+            println!(
+                "Key shard {} checksum: {}",
+                idx + 1,
+                encrypted_shard.checksum_string()
+            );
+
+            let codewords = read_codewords(format!("Enter key shard {} codewords", idx + 1))?;
+            let shard = encrypted_shard
+                .decrypt(&codewords)
+                .map_err(|err| anyhow!(err)) // TODO: Fix this once FromWire supports non-String errors.
+                .with_context(|| format!("decrypting key shard {}", idx + 1))?;
+
+            println!("Loaded key shard {}.", shard.id());
+            quorum.push_shard(shard);
+        }
     }
 
     let quorum = quorum.validate().map_err(|err| {
