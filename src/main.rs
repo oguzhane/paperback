@@ -185,17 +185,12 @@ fn read_multibase_qr<S: AsRef<str>, T: FromWire>(prompt: S) -> Result<T, Error> 
 // paperback-cli recover --interactive
 fn recover_cli() -> Command {
     Command::new("recover")
-        .about(r#"Recover a paperback backup."#)
+        .about("Recover a paperback backup.")
+        // Mode flags
         .arg(
             Arg::new("interactive")
                 .long("interactive")
-                .help("Ask for data stored in QR codes interactively rather than scanning images.")
-                .action(ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("file")
-                .long("file")
-                .help("Recover data by scanning PDF files.")
+                .help("Recover interactively using QR codes.")
                 .action(ArgAction::SetTrue),
         )
         .arg(
@@ -203,34 +198,33 @@ fn recover_cli() -> Command {
                 .long("main-document")
                 .help("The main PDF document to recover from.")
                 .value_name("PDF")
-                .requires("file")
-                .required_if_eq("file", "true") // required only if --file
                 .action(ArgAction::Set),
         )
+        // Key shards, required only if main-document is provided
         .arg(
             Arg::new("key-shards")
                 .long("key-shards")
                 .help("Comma-separated list of key shard PDF files.")
                 .value_name("SHARDS")
-                .requires("file")
-                .required_if_eq("file", "true") // required only if --file
+                .required_unless_present("interactive")
                 .use_value_delimiter(true)
                 .action(ArgAction::Append),
         )
+        // Output file (always required)
         .arg(
             Arg::new("OUTPUT")
-                .help(r#"Path to write recovered secret data to ("-" to write to stdout)."#)
-                .action(ArgAction::Set)
-                .allow_hyphen_values(true)
+                .help("Path to write recovered secret data to ('-' for stdout).")
                 .required(true)
                 .index(1),
         )
+        // Only one mode can be chosen
         .group(
             ArgGroup::new("mode")
-                .args(&["interactive", "file"])
+                .args(&["interactive", "main-document"])
                 .required(true)
                 .multiple(false),
         )
+
 }
 
 fn scan_key_shard(pdf_file: &String) -> Result<KeyShard, Error> {
