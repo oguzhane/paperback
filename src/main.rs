@@ -29,7 +29,7 @@ use anyhow::{anyhow, bail, ensure, Context, Error, Ok};
 use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command};
 
 extern crate paperback_core;
-use paperback_core::{latest as paperback};
+use paperback_core::latest as paperback;
 
 use paperback::{
     pdf::qr, wire, Backup, EncryptedKeyShard, FromWire, KeyShard, KeyShardCodewords, MainDocument,
@@ -426,6 +426,89 @@ fn scan_main_document(pdf_file: &String) -> Result<MainDocument, Error> {
         .map_err(|err| anyhow!("failed to parse main document data: {}", err))
 }
 
+fn recover_from_pdf(
+    main_doc_file: &String,
+    key_shard_files: &[&String],
+) -> Result<UntrustedQuorum, Error> {
+    let mut quorum = UntrustedQuorum::new();
+
+    let main_document: MainDocument = scan_main_document(&main_doc_file)?;
+    let quorum_size = main_document.quorum_size();
+    // TODO: Ask the user to input the checksum...
+    println!(
+        "Main document checksum: {}",
+        main_document.checksum_string()
+    );
+
+    println!("Document ID: {}", main_document.id());
+    println!("{} key shards required.", quorum_size);
+    ensure!(
+        key_shard_files.len() >= quorum_size as usize,
+        "not enough key shard files provided (have {}, need {})",
+        key_shard_files.len(),
+        quorum_size
+    );
+
+    quorum.main_document(main_document);
+
+    while quorum.num_untrusted_shards() < quorum_size as usize {
+        let idx = quorum.num_untrusted_shards() as usize;
+        let shard = scan_key_shard(key_shard_files[idx])?;
+        println!("Loaded key shard {}.", shard.id());
+        quorum.push_shard(shard);
+    }
+
+    Ok(quorum)
+}
+
+fn recover_interactive() -> Result<UntrustedQuorum, Error> {
+    let mut quorum = UntrustedQuorum::new();
+
+    let main_document: MainDocument = read_multibase_qr("Enter a main document code")?;
+    let quorum_size = main_document.quorum_size();
+    // TODO: Ask the user to input the checksum...
+    println!(
+        "Main document checksum: {}",
+        main_document.checksum_string()
+    );
+
+    println!("Document ID: {}", main_document.id());
+    println!("{} key shards required.", quorum_size);
+
+    let mut quorum = UntrustedQuorum::new();
+    quorum.main_document(main_document);
+    while quorum.num_untrusted_shards() < quorum_size as usize {
+        let idx = quorum.num_untrusted_shards() as u32;
+        let encrypted_shard: EncryptedKeyShard = read_multibase(format!(
+            "Quorum contains [{}] key shards.\nEnter key shard {} of {}",
+            quorum
+                .untrusted_shards()
+                .map(KeyShard::id)
+                .collect::<Vec<_>>()
+                .join(" "),
+            idx + 1,
+            quorum_size
+        ))?;
+        // TODO: Ask the user to input the checksum...
+        println!(
+            "Key shard {} checksum: {}",
+            idx + 1,
+            encrypted_shard.checksum_string()
+        );
+
+        let codewords = read_codewords(format!("Enter key shard {} codewords", idx + 1))?;
+        let shard = encrypted_shard
+            .decrypt(&codewords)
+            .map_err(|err| anyhow!(err)) // TODO: Fix this once FromWire supports non-String errors.
+            .with_context(|| format!("decrypting key shard {}", idx + 1))?;
+
+        println!("Loaded key shard {}.", shard.id());
+        quorum.push_shard(shard);
+    }
+
+    Ok(quorum)
+}
+
 fn recover(matches: &ArgMatches) -> Result<(), Error> {
     let interactive = matches.get_flag("interactive");
 
@@ -433,9 +516,7 @@ fn recover(matches: &ArgMatches) -> Result<(), Error> {
         .get_one::<String>("OUTPUT")
         .context("required OUTPUT argument not provided")?;
 
-    let mut quorum = UntrustedQuorum::new();
-
-    if !interactive {
+    let mut quorum: UntrustedQuorum = if !interactive {
         let main_doc_file = matches
             .get_one::<String>("main-document")
             .context("required --main-document argument not provided")?;
@@ -445,74 +526,10 @@ fn recover(matches: &ArgMatches) -> Result<(), Error> {
             .context("required --key-shards argument not provided")?
             .collect();
 
-        let main_document: MainDocument = scan_main_document(&main_doc_file)?;
-        let quorum_size = main_document.quorum_size();
-        // TODO: Ask the user to input the checksum...
-        println!(
-            "Main document checksum: {}",
-            main_document.checksum_string()
-        );
-
-        println!("Document ID: {}", main_document.id());
-        println!("{} key shards required.", quorum_size);
-        ensure!(
-            key_shard_files.len() >= quorum_size as usize,
-            "not enough key shard files provided (have {}, need {})",
-            key_shard_files.len(),
-            quorum_size
-        );
-
-        quorum.main_document(main_document);
-
-        while quorum.num_untrusted_shards() < quorum_size as usize {
-            let idx = quorum.num_untrusted_shards() as usize;
-            let shard = scan_key_shard(key_shard_files[idx])?;
-            println!("Loaded key shard {}.", shard.id());
-            quorum.push_shard(shard);
-        }
+        recover_from_pdf(main_doc_file, &key_shard_files)?
     } else {
-        let main_document: MainDocument = read_multibase_qr("Enter a main document code")?;
-        let quorum_size = main_document.quorum_size();
-        // TODO: Ask the user to input the checksum...
-        println!(
-            "Main document checksum: {}",
-            main_document.checksum_string()
-        );
-
-        println!("Document ID: {}", main_document.id());
-        println!("{} key shards required.", quorum_size);
-
-        let mut quorum = UntrustedQuorum::new();
-        quorum.main_document(main_document);
-        while quorum.num_untrusted_shards() < quorum_size as usize {
-            let idx = quorum.num_untrusted_shards() as u32;
-            let encrypted_shard: EncryptedKeyShard = read_multibase(format!(
-                "Quorum contains [{}] key shards.\nEnter key shard {} of {}",
-                quorum
-                    .untrusted_shards()
-                    .map(KeyShard::id)
-                    .collect::<Vec<_>>()
-                    .join(" "),
-                idx + 1,
-                quorum_size
-            ))?;
-            // TODO: Ask the user to input the checksum...
-            println!(
-                "Key shard {} checksum: {}",
-                idx + 1,
-                encrypted_shard.checksum_string()
-            );
-
-            let codewords = read_codewords(format!("Enter key shard {} codewords", idx + 1))?;
-            let shard = encrypted_shard
-                .decrypt(&codewords)
-                .map_err(|err| anyhow!(err)) // TODO: Fix this once FromWire supports non-String errors.
-                .with_context(|| format!("decrypting key shard {}", idx + 1))?;
-
-            println!("Loaded key shard {}.", shard.id());
-            quorum.push_shard(shard);
-        }
-    }
+        recover_interactive()?
+    };
 
     let quorum = quorum.validate().map_err(|err| {
         anyhow!(
