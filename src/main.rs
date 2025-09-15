@@ -22,7 +22,6 @@ use std::{
     error::Error as StdError,
     fs::File,
     io::{self, prelude::*, BufReader, BufWriter},
-    ops::Index,
     path,
 };
 
@@ -30,7 +29,7 @@ use anyhow::{anyhow, bail, ensure, Context, Error, Ok};
 use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command};
 
 extern crate paperback_core;
-use paperback_core::{latest as paperback, v0::pdf};
+use paperback_core::{latest as paperback};
 
 use paperback::{
     pdf::qr, wire, Backup, EncryptedKeyShard, FromWire, KeyShard, KeyShardCodewords, MainDocument,
