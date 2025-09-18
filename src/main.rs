@@ -311,7 +311,6 @@ fn scan_key_shard(pdf_file: &String) -> Result<KeyShard, Error> {
         .set_target_width(2048);
     let image = page.render_with_config(&render_config)?.as_image();
 
-    println!("Converted!");
     // Convert RGBA to RGB
     let rgb_image = image.to_rgb8();
 
@@ -328,8 +327,6 @@ fn scan_key_shard(pdf_file: &String) -> Result<KeyShard, Error> {
 
     for barcode in barcodes.iter().filter(|b| b.is_ok()) {
         let bc = barcode.as_ref().unwrap();
-
-        println!("Found QR code: {}", bc);
 
         let encrypted_shard: EncryptedKeyShard = wire::FromWire::from_wire_multibase(
             wire::multibase_strip(bc)
@@ -422,7 +419,6 @@ fn scan_main_document(pdf_file: &String) -> Result<MainDocument, Error> {
         .set_target_width(2048);
     let image = page.render_with_config(&render_config)?.as_image();
 
-    println!("Converted!");
     // Convert RGBA to RGB
     let rgb_image = image.to_rgb8();
 
@@ -438,21 +434,12 @@ fn scan_main_document(pdf_file: &String) -> Result<MainDocument, Error> {
     let barcodes = decoder.decode(&img);
     let mut joiner = qr::Joiner::new();
 
-    // let document_code_part: qr::Part = wire::FromWire::from_wire_multibase(
-    //     wire::multibase_strip(document_code)
-    //         .map_err(|err| anyhow!("failed to strip out non-multibase characters: {}", err))?,
-    // )
-    // .map_err(|err| anyhow!("failed to parse data: {}", err))?;
-
-    // joiner.add_part(document_code_part)?;
-
     for barcode in barcodes.iter().filter(|b| b.is_ok()) {
         if joiner.complete() {
             break;
         }
 
         let bc = barcode.as_ref().unwrap();
-        println!("Found QR code: {}", bc);
 
         let bc_code_part: qr::Part = wire::FromWire::from_wire_multibase(
             wire::multibase_strip(bc)
