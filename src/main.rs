@@ -380,40 +380,6 @@ fn scan_main_document(pdf_file: &String) -> Result<MainDocument, Error> {
 
     let page = document.pages().first()?;
 
-    let mut document_code = String::new();
-    // Keep track of whether we've seen the 'Document' word
-    let mut document_seen = false;
-
-    let texts_iter = page
-        .objects()
-        .iter()
-        .filter_map(|object| object.as_text_object().map(|object| object.text()))
-        .enumerate();
-
-    for (_, text) in texts_iter {
-        let trimmed = text.trim();
-
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        if document_seen && document_code.is_empty() {
-            document_code = trimmed.to_string();
-            println!("Document code: {}", document_code);
-            break;
-        }
-
-        if trimmed == "Document" && document_code.is_empty() {
-            document_seen = true;
-            continue;
-        }
-    }
-
-    ensure!(
-        !document_code.is_empty(),
-        "failed to find document code in main document"
-    );
-
     println!("Converting main document to image...");
     let render_config = PdfRenderConfig::new()
         .set_target_width(2048);
