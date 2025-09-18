@@ -250,7 +250,8 @@ fn scan_key_shard(pdf_file: &String) -> Result<KeyShard, Error> {
 
     // Initialize Pdfium
     let pdfium = Pdfium::new(
-        Pdfium::bind_to_system_library().or_else(|_| Pdfium::bind_to_system_library())?,
+        Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./"))
+            .or_else(|_| Pdfium::bind_to_system_library())?
     );
 
     // Load the PDF document
@@ -307,11 +308,15 @@ fn scan_key_shard(pdf_file: &String) -> Result<KeyShard, Error> {
 
     println!("Converting key shard document to image...");
     let render_config = PdfRenderConfig::new()
-        .set_target_width(2048)
-        .rotate_if_landscape(PdfPageRenderRotation::Degrees90, true);
+        .set_target_width(2048);
     let image = page.render_with_config(&render_config)?.as_image();
 
-    image.save(&jpg_path)?;
+    println!("Converted!");
+    // Convert RGBA to RGB
+    let rgb_image = image.to_rgb8();
+
+    rgb_image.save(&jpg_path)?;
+
     println!("Saved {}", jpg_path.to_string_lossy());
 
     println!("Decoding encrypted key shard document QR code...");
@@ -323,6 +328,8 @@ fn scan_key_shard(pdf_file: &String) -> Result<KeyShard, Error> {
 
     for barcode in barcodes.iter().filter(|b| b.is_ok()) {
         let bc = barcode.as_ref().unwrap();
+
+        println!("Found QR code: {}", bc);
 
         let encrypted_shard: EncryptedKeyShard = wire::FromWire::from_wire_multibase(
             wire::multibase_strip(bc)
@@ -367,7 +374,8 @@ fn scan_main_document(pdf_file: &String) -> Result<MainDocument, Error> {
 
     // Initialize Pdfium
     let pdfium = Pdfium::new(
-        Pdfium::bind_to_system_library().or_else(|_| Pdfium::bind_to_system_library())?,
+        Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./"))
+            .or_else(|_| Pdfium::bind_to_system_library())?
     );
 
     // Load the PDF document
@@ -411,11 +419,15 @@ fn scan_main_document(pdf_file: &String) -> Result<MainDocument, Error> {
 
     println!("Converting main document to image...");
     let render_config = PdfRenderConfig::new()
-        .set_target_width(2048)
-        .rotate_if_landscape(PdfPageRenderRotation::Degrees90, true);
+        .set_target_width(2048);
     let image = page.render_with_config(&render_config)?.as_image();
 
-    image.save(&jpg_path)?;
+    println!("Converted!");
+    // Convert RGBA to RGB
+    let rgb_image = image.to_rgb8();
+
+    rgb_image.save(&jpg_path)?;
+
     println!("Saved {}", jpg_path.to_string_lossy());
 
     println!("Decoding main document QR codes...");
@@ -426,13 +438,13 @@ fn scan_main_document(pdf_file: &String) -> Result<MainDocument, Error> {
     let barcodes = decoder.decode(&img);
     let mut joiner = qr::Joiner::new();
 
-    let document_code_part: qr::Part = wire::FromWire::from_wire_multibase(
-        wire::multibase_strip(document_code)
-            .map_err(|err| anyhow!("failed to strip out non-multibase characters: {}", err))?,
-    )
-    .map_err(|err| anyhow!("failed to parse data: {}", err))?;
+    // let document_code_part: qr::Part = wire::FromWire::from_wire_multibase(
+    //     wire::multibase_strip(document_code)
+    //         .map_err(|err| anyhow!("failed to strip out non-multibase characters: {}", err))?,
+    // )
+    // .map_err(|err| anyhow!("failed to parse data: {}", err))?;
 
-    joiner.add_part(document_code_part)?;
+    // joiner.add_part(document_code_part)?;
 
     for barcode in barcodes.iter().filter(|b| b.is_ok()) {
         if joiner.complete() {
@@ -440,6 +452,7 @@ fn scan_main_document(pdf_file: &String) -> Result<MainDocument, Error> {
         }
 
         let bc = barcode.as_ref().unwrap();
+        println!("Found QR code: {}", bc);
 
         let bc_code_part: qr::Part = wire::FromWire::from_wire_multibase(
             wire::multibase_strip(bc)
