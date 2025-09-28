@@ -27,39 +27,58 @@ name: binaries
 jobs:
   build:
     name: build
-    runs-on: ubuntu-latest
     strategy:
       matrix:
-        target:
-          - x86_64-unknown-linux-musl
-          - x86_64-apple-darwin
-          - x86_64-pc-windows-msvc
-          - i686-pc-windows-msvc
-          - aarch64-unknown-linux-musl
-          - armv7-unknown-linux-musleabihf
-          - arm-unknown-linux-musleabihf
-          - armv5te-unknown-linux-musleabi
+        platform:
+          - os-name: FreeBSD-x86_64
+            runs-on: ubuntu-24.04
+            target: x86_64-unknown-freebsd
 
+          - os-name: Linux-x86_64
+            runs-on: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+
+          - os-name: Linux-aarch64
+            runs-on: ubuntu-24.04
+            target: aarch64-unknown-linux-musl
+
+          - os-name: Linux-riscv64
+            runs-on: ubuntu-24.04
+            target: riscv64gc-unknown-linux-gnu
+
+          - os-name: Windows-x86_64
+            runs-on: windows-latest
+            target: x86_64-pc-windows-msvc
+
+          - os-name: macOS-x86_64
+            runs-on: macOS-latest
+            target: x86_64-apple-darwin
+            
+          # more targets here ...
+
+    runs-on: ${{ matrix.platform.runs-on }}
     steps:
-    - uses: actions/checkout@v5
-    
-    - uses: houseabsolute/actions-rust-cross@v1
-      with:
-        command: build
-        target: ${{ matrix.target }}
-        args: "--release --all-features"
-        strip: true
-        
-    - name: upload unix binaries
-      uses: actions/upload-artifact@v4
-      if: "!contains(matrix.target, 'windows')"
-      with:
-        name: "paperback.${{ matrix.target }}"
-        path: "target/${{ matrix.target }}/release/paperback"
-        
-    - name: upload windows binaries
-      uses: actions/upload-artifact@v4
-      if: contains(matrix.target, 'windows')
-      with:
-        name: "paperback-${{ matrix.target }}.exe"
-        path: "target/${{ matrix.target }}/release/paperback.exe"
+      - name: Checkout
+        uses: actions/checkout@v5
+      
+      - name: Build binary
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: build
+          target: ${{ matrix.platform.target }}
+          args: "--locked --release"
+          strip: true
+      
+      - name: upload unix binaries
+        uses: actions/upload-artifact@v4
+        if: contains(matrix.build, 'win') == false
+        with:
+          name: "paperback.${{ matrix.target }}"
+          path: "target/${{ matrix.target }}/release/paperback"
+
+      - name: upload windows binaries
+        uses: actions/upload-artifact@v4
+        if: contains(matrix.build, 'win')
+        with:
+          name: "paperback-${{ matrix.target }}.exe"
+          path: "target/${{ matrix.target }}/release/paperback.exe"
