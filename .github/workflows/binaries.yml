@@ -74,3 +74,4 @@ jobs:
         with:
           executable-name: paperback
           target: ${{ matrix.platform.target }}
+          changes-file: ""
