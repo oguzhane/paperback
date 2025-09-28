@@ -69,16 +69,8 @@ jobs:
           args: "--locked --release"
           strip: true
       
-      - name: upload unix binaries
-        uses: actions/upload-artifact@v4
-        if: contains(matrix.build, 'win') == false
+      - name: Publish artifacts and release
+        uses: houseabsolute/actions-rust-release@v0
         with:
-          name: "paperback.${{ matrix.target }}"
-          path: "target/${{ matrix.target }}/release/paperback"
-
-      - name: upload windows binaries
-        uses: actions/upload-artifact@v4
-        if: contains(matrix.build, 'win')
-        with:
-          name: "paperback-${{ matrix.target }}.exe"
-          path: "target/${{ matrix.target }}/release/paperback.exe"
+          executable-name: paperback
+          target: ${{ matrix.platform.target }}
