@@ -30,7 +30,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        build: [linux, macos, win-msvc, win32-msvc]
+        build: [linux, macos, win-msvc, win32-msvc, linux-arm64, linux-armv7, linux-armv6, linux-armv5]
         include:
         - build: linux
           os: ubuntu-latest
@@ -44,6 +44,18 @@ jobs:
         - build: win32-msvc
           os: windows-2025
           target: i686-pc-windows-msvc
+        - build: linux-arm64
+          os: ubuntu-latest
+          target: aarch64-unknown-linux-musl
+        - build: linux-armv7
+          os: ubuntu-latest
+          target: armv7-unknown-linux-musleabihf
+        - build: linux-armv6
+          os: ubuntu-latest
+          target: arm-unknown-linux-musleabihf
+        - build: linux-armv5
+          os: ubuntu-latest
+          target: armv5te-unknown-linux-musleabi
 
     steps:
     - uses: actions/checkout@v5
@@ -55,7 +67,7 @@ jobs:
     - name: cargo build
       run: cargo build --target ${{ matrix.target }} --release --all-features
     - name: strip paperback binary
-      if: matrix.build == 'linux' || matrix.build == 'macos'
+      if: matrix.build == 'linux' || matrix.build == 'macos' || matrix.build == 'linux-arm64' || matrix.build == 'linux-armv7' || matrix.build == 'linux-armv6' || matrix.build == 'linux-armv5'
       run: strip target/${{ matrix.target }}/release/paperback
     - name: upload unix binaries
       uses: actions/upload-artifact@v4
