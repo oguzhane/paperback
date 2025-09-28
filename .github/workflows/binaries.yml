@@ -38,7 +38,11 @@ jobs:
             runs-on: ubuntu-24.04
             target: x86_64-unknown-linux-musl
 
-          - os-name: Linux-aarch64
+          - os-name: Linux-aarch64-gnu
+            runs-on: ubuntu-24.04
+            target: aarch64-unknown-linux-gnu
+
+          - os-name: Linux-aarch64-musl
             runs-on: ubuntu-24.04
             target: aarch64-unknown-linux-musl
 
