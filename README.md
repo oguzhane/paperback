@@ -68,6 +68,39 @@ the included design document][design].
 
 [design]: DESIGN.md
 
+### Fork Changes ###
+
+This is a fork of [cyphar/paperback](https://github.com/cyphar/paperback) with
+the following additions:
+
+#### PDF-Based Recovery
+
+The upstream project only supports `--interactive` recovery (manually typing QR
+code data into the terminal). This fork adds automated recovery directly from
+PDF files using:
+
+- **[`pdfium-render`](https://github.com/ajrcarey/pdfium-render)** — renders
+  PDF pages to images and extracts text objects
+- **[`bardecoder`](https://github.com/piderman314/bardecoder)** — decodes QR
+  codes from rendered images
+- **[`image`](https://github.com/image-rs/image)** — image processing
+
+See the [Usage](#usage) section below for details on the new `--main-document`
+and `--shards` flags.
+
+#### Expanded Cross-Platform CI/CD Build Matrix
+
+The CI/CD pipeline now uses
+[`houseabsolute/actions-rust-cross`](https://github.com/houseabsolute/actions-rust-cross)
+and builds pre-compiled binaries for:
+
+- FreeBSD x86_64
+- Linux x86_64 (musl)
+- Linux aarch64 (gnu & musl)
+- Linux armv7 (musl)
+- Windows x86_64
+- macOS x86_64
+
 ### Usage ###
 
 Paperback is written in [Rust][rust]. In order to build Rust you need to have a
@@ -96,10 +129,34 @@ The general usage of paperback is:
    shards will be saved in the current directory with names resembling
    `key_shard-xxxxxxxx-hyyyyyyy.pdf` (with `hyyyyyyy` being the shard ID).
 
- * Recover a backup using `paperback recover --interactive OUTPUT_FILE`. You
-   will be asked to input the main document data, followed by the shard data and
-   codewords. The output file is the path to where the secret data will be
-   output (or `-` to write to stdout).
+ * Recover a backup using one of the two modes below. The output file is the
+   path to where the secret data will be output (or `-` to write to stdout).
+   `--interactive` and `--main-document` are mutually exclusive.
+
+   **PDF-based recovery (new in this fork)**:
+
+   ```
+   paperback recover --main-document <MAIN_PDF> --shards <SHARD1.pdf>,<SHARD2.pdf>,... OUTPUT_FILE
+   ```
+
+   - `--main-document <PDF>` — path to the main document PDF file
+   - `--shards <SHARDS>` — comma-separated list of key shard PDF files
+
+   This mode requires the [PDFium](https://pdfium.googlesource.com/pdfium/)
+   native library to be available. Paperback looks for it in the current
+   directory first, then falls back to the system library path. Pre-built
+   PDFium binaries can be downloaded from
+   [pdfium-binaries](https://github.com/nickvdyck/pdfium-binaries) or similar
+   sources.
+
+   **Interactive recovery**:
+
+   ```
+   paperback recover --interactive OUTPUT_FILE
+   ```
+
+   You will be asked to input the main document data, followed by the shard
+   data and codewords.
 
    Note that for key shards, the QR code data will be encoded differently to
    the "text fallback". This is because it is more space efficient to store the
@@ -155,10 +212,6 @@ The general usage of paperback is:
 Note that when inputting data in "interactive mode" you have to put an extra
 blank space to indicate that you've finished inputting the data for that QR
 code. This is to allow you to break the input up over several lines.
-
-Currently, paperback only supports "interactive" input. In the future, paperback
-will be able to automatically scan the data from each QR code in an image or PDF
-version of the documents.
 
 [rust]: https://www.rust-lang.org/
 [cargo]: https://doc.rust-lang.org/cargo/
